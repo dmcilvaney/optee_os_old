@@ -41,9 +41,6 @@
 #include <rpmsglite/rpmsg_queue.h>
 #include <rpmsglite/rpmsg_ns.h>
 
-/* If enabled, the PTA boots up the remote and locks down its config */
-#define BOOT_REMOTE 1
-
 /* Local and remote end-points addresses, on the remote side, the 2 addresses
  * should be swapped.
  */
@@ -51,6 +48,7 @@
 #define REMOTE_EPT_ADDR 40
 
 struct rpmsg_context {
+	bool rpmsg_initialized;
 	struct rpmsg_lite_instance inst;
 	struct rpmsg_lite_ept_static_context ept_ctx;
 	struct rpmsg_lite_endpoint *ept;
@@ -60,6 +58,69 @@ struct rpmsg_context {
 };
 
 static struct rpmsg_context rpmsg_ctx;
+
+static int rpmsg_init(void)
+{
+	struct rpmsg_lite_endpoint *ept;
+	rpmsg_queue_handle q;
+	int ret;
+
+	if (rpmsg_ctx.rpmsg_initialized) {
+		ret = 0;
+		goto end;
+	}
+
+	if (!rpmsg_lite_master_init(rpmsg_ctx.shmem, rpmsg_ctx.shmem_size,
+				    RL_PLATFORM_LINK_ID, RL_NO_FLAGS,
+				    &rpmsg_ctx.inst)) {
+
+		EMSG("failed to init RPMsg");
+		ret = -1;
+		goto end;
+	}
+
+	IMSG("master is ready and link is up");
+
+	q = rpmsg_queue_create(&rpmsg_ctx.inst);
+	if (!q) {
+		EMSG("failed to create RPMsg recv queue");
+		ret = -1;
+		goto end;
+	}
+
+	rpmsg_ctx.q = q;
+
+	ept = rpmsg_lite_create_ept(&rpmsg_ctx.inst, LOCAL_EPT_ADDR,
+				    rpmsg_queue_rx_cb, q, &rpmsg_ctx.ept_ctx);
+	if (!ept) {
+		EMSG("failed to create end-point");
+		ret = -1;
+		goto end;
+	}
+
+	rpmsg_ctx.ept = ept;
+
+	ret = 0;
+	IMSG("RPMsg is ready. local ept addr:%u remote ept addr:%u",
+	     LOCAL_EPT_ADDR, REMOTE_EPT_ADDR);
+
+	rpmsg_ctx.rpmsg_initialized = true;
+
+end:
+	if (ret) {
+		if (rpmsg_ctx.ept) {
+			rpmsg_lite_destroy_ept(&rpmsg_ctx.inst, rpmsg_ctx.ept);
+		}
+
+		if (rpmsg_ctx.q) {
+			rpmsg_queue_destroy(&rpmsg_ctx.inst, rpmsg_ctx.q);
+		}
+
+		rpmsg_lite_deinit(&rpmsg_ctx.inst);
+	}
+
+	return ret;
+}
 
 static int carveout_shared_mem(void)
 {
@@ -84,9 +145,63 @@ static int carveout_shared_mem(void)
 	return 0;
 }
 
+static TEE_Result rpmsg_boot_remote(void *psess __unused,
+				  uint32_t ptypes,
+				  TEE_Param params[4])
+{
+	uint32_t exp_pt = TEE_PARAM_TYPES(
+		TEE_PARAM_TYPE_VALUE_INPUT, TEE_PARAM_TYPE_NONE,
+		TEE_PARAM_TYPE_NONE, TEE_PARAM_TYPE_NONE);
+
+	if (exp_pt != ptypes) {
+		EMSG("invalid parameters");
+		return TEE_ERROR_BAD_PARAMETERS;
+	}
+
+	/* currently a single remote is supported and core identification is not
+	 * implemented. This param is expected to be 0 and should be treated as
+	 * reserved.
+	 */
+	if (params[0].value.a != 0) {
+		return TEE_ERROR_BAD_PARAMETERS;
+	}
+
+	if (carveout_shared_mem()) {
+		return TEE_ERROR_OUT_OF_MEMORY;
+	}
+
+	if (!rpmsg_ipc_boot_remote()) {
+		EMSG("Failed to boot remote processor");
+		return TEE_ERROR_COMMUNICATION;
+	}
+
+	DMSG("remote core is up and running");
+
+	if (!rpmsg_ipc_lock_remote()) {
+		EMSG("Failed to lock remote processor configuratins");
+		return TEE_ERROR_BAD_STATE;
+	}
+
+	DMSG("remote config is locked-down");
+
+	/* consider waiting a fixed amout of time instead of blocking */
+	if (!rpmsg_ipc_wait_remote_ready(0)) {
+		EMSG("timeout waiting for remote processor to get into ready state ");
+		return TEE_ERROR_TARGET_DEAD;
+	}
+
+	if (rpmsg_init() != TEE_SUCCESS) {
+		EMSG("rpmsg init failed");
+		return TEE_ERROR_BAD_STATE;
+	}
+
+	DMSG("remote booted successfully");
+	return TEE_SUCCESS;
+}
+
 static TEE_Result rpmsg_remote_io(void *psess __unused,
-				  uint32_t ptypes __unused,
-				  TEE_Param params[4] __unused)
+				  uint32_t ptypes,
+				  TEE_Param params[4])
 {
 	uint8_t *in_buffer;
 	uint32_t in_buffer_size;
@@ -108,14 +223,9 @@ static TEE_Result rpmsg_remote_io(void *psess __unused,
 	in_buffer_size = params[1].memref.size;
 	out_buffer_size = params[2].memref.size;
 
-	if ((in_buffer_size != sizeof(uint32_t))
-	    || (out_buffer_size != sizeof(uint32_t))) {
+	DMSG("sending IO msg with input size:%u output size:%d", in_buffer_size,
+	     out_buffer_size);
 
-		EMSG("invalid buffer sizes");
-		return TEE_ERROR_BAD_FORMAT;
-	}
-
-	DMSG("sending IO msg with size:%u", in_buffer_size);
 	if (rpmsg_lite_send(&rpmsg_ctx.inst, rpmsg_ctx.ept, REMOTE_EPT_ADDR,
 			    (char *)in_buffer, in_buffer_size, RL_BLOCK)) {
 
@@ -125,7 +235,7 @@ static TEE_Result rpmsg_remote_io(void *psess __unused,
 
 	DMSG("IO msg sent, waiting for response...");
 	if (rpmsg_queue_recv(&rpmsg_ctx.inst, rpmsg_ctx.q, &msg_src_ept_addr,
-			     (char *)&out_buffer, out_buffer_size,
+			     (char *)out_buffer, out_buffer_size,
 			     &total_received, RL_BLOCK)) {
 
 		EMSG("failed to receive IO msg response");
@@ -157,14 +267,18 @@ static void rpmsg_close_session(void *sess_ctx)
 	DMSG("RPMsg PTA close session");
 }
 
-static TEE_Result rpmsg_invoke_command(void *psess __unused,
-				       uint32_t cmd __unused,
-				       uint32_t ptypes __unused,
-				       TEE_Param params[4] __unused)
+static TEE_Result rpmsg_invoke_command(void *psess,
+				       uint32_t cmd,
+				       uint32_t ptypes,
+				       TEE_Param params[4])
 {
 	TEE_Result res;
 
 	switch (cmd) {
+	case PTA_RPMSG_CMD_BOOT_REMOTE:
+		DMSG("PTA_RPMSG_CMD_BOOT_REMOTE");
+		res = rpmsg_boot_remote(psess, ptypes, params);
+		break;
 	case PTA_RPMSG_CMD_REMOTE_IO:
 		DMSG("PTA_RPMSG_CMD_REMOTE_IO");
 		res = rpmsg_remote_io(psess, ptypes, params);
@@ -180,88 +294,9 @@ static TEE_Result rpmsg_invoke_command(void *psess __unused,
 
 static TEE_Result pta_rpmsg_init(void)
 {
-	TEE_Result res;
-	struct rpmsg_lite_endpoint *ept;
-	rpmsg_queue_handle q;
-
-	DMSG("initializaing RPMsg PTA");
-
-#if BOOT_REMOTE
-	if (!rpmsg_ipc_boot_remote()) {
-		EMSG("Failed to boot remote processor");
-		res = TEE_ERROR_COMMUNICATION;
-		goto end;
-	}
-
-	DMSG("remote core is up and running");
-
-	if (!rpmsg_ipc_lock_remote()) {
-		EMSG("Failed to lock remote processor configuratins");
-		res = TEE_ERROR_BAD_STATE;
-		goto end;
-	}
-
-	DMSG("remote config is locked-down");
-
-	/* consider waiting a fixed amout of time instead of blocking */
-	if (!rpmsg_ipc_wait_remote_ready(0)) {
-		EMSG("timeout waiting for remote processor to get into ready state ");
-		res = TEE_ERROR_TARGET_DEAD;
-		goto end;
-	}
-
-	DMSG("remote is ready");
-#endif
-
 	memset(&rpmsg_ctx, 0x00, sizeof(rpmsg_ctx));
 
-	if (carveout_shared_mem()) {
-		res = TEE_ERROR_OUT_OF_MEMORY;
-		goto end;
-	}
-
-	if (!rpmsg_lite_master_init(rpmsg_ctx.shmem, rpmsg_ctx.shmem_size,
-				    RL_PLATFORM_LINK_ID, RL_NO_FLAGS,
-				    &rpmsg_ctx.inst)) {
-
-		EMSG("failed to init RPMsg");
-		res = TEE_ERROR_BAD_STATE;
-		goto end;
-	}
-
-	IMSG("master is ready and link is up");
-
-	q = rpmsg_queue_create(&rpmsg_ctx.inst);
-	if (!q) {
-		EMSG("failed to create RPMsg recv queue");
-		res = TEE_ERROR_BAD_STATE;
-		goto end;
-	}
-
-	rpmsg_ctx.q = q;
-
-	ept = rpmsg_lite_create_ept(&rpmsg_ctx.inst, LOCAL_EPT_ADDR,
-				    rpmsg_queue_rx_cb, q, &rpmsg_ctx.ept_ctx);
-	if (!ept) {
-		EMSG("failed to create end-point");
-		res = TEE_ERROR_BAD_STATE;
-		goto end;
-	}
-
-	rpmsg_ctx.ept = ept;
-
-	res = TEE_SUCCESS;
-	IMSG("RPMsg is ready. local ept addr:%u remote ept addr:%u",
-	     LOCAL_EPT_ADDR, REMOTE_EPT_ADDR);
-
-end:
-	if (res != TEE_SUCCESS) {
-		rpmsg_lite_destroy_ept(&rpmsg_ctx.inst, rpmsg_ctx.ept);
-		rpmsg_queue_destroy(&rpmsg_ctx.inst, rpmsg_ctx.q);
-		rpmsg_lite_deinit(&rpmsg_ctx.inst);
-	}
-
-	return res;
+	return TEE_SUCCESS;
 }
 
 service_init_late(pta_rpmsg_init);

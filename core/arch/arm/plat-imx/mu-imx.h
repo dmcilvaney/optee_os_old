@@ -20,6 +20,8 @@
 
 #define MU_CHANNEL_COUNT 4u
 
+#define MU_POLL_TIMEOUT 10000
+
 #define MU_CR_GIEn_SHIFT 28
 #define MU_CR_GIEn_MASK (0xF << MU_CR_GIEn_SHIFT)
 #define MU_CR_GIEn(IDX) (((0x8 >> (IDX)) << MU_CR_GIEn_SHIFT) & MU_CR_GIEn_MASK)
@@ -36,11 +38,12 @@
 #define MU_CR_GIRn_MASK (0xF << MU_CR_GIRn_SHIFT)
 #define MU_CR_Fn_SHIFT 0
 #define MU_CR_Fn_MASK (0x7 << MU_CR_Fn_SHIFT)
-#define MU_CR_Fn(IDX) ((0x1 << ((IDX) + MU_CR_Fn_SHIFT) & MU_SR_Fn_MASK)
+#define MU_CR_Fn(IDX) ((0x1 << ((IDX) + MU_CR_Fn_SHIFT) & MU_CR_Fn_MASK)
 
 #define MU_SR_Fn_SHIFT 0
 #define MU_SR_Fn_MASK (0x7 << MU_SR_Fn_SHIFT)
 #define MU_SR_Fn(IDX) ((0x1 << ((IDX) + MU_SR_Fn_SHIFT)) & MU_SR_Fn_MASK)
+#define MU_SR_Fn_BIT_COUNT 3
 
 #define MU_SR_TEn_SHIFT 20
 #define MU_SR_TEn_MASK (0xF << MU_SR_TEn_SHIFT)
@@ -49,11 +52,11 @@
 #define MU_SR_RFn_SHIFT 24
 #define MU_SR_RFn_MASK (0xF << MU_SR_RFn_SHIFT)
 #define MU_SR_RF(CH) (((0x8 >> (CH)) << MU_SR_RFn_SHIFT) & MU_SR_RFn_MASK)
-#define MU_POLL_TIMEOUT 10000
 
 #define MU_SR_GIPn_SHIFT 28
 #define MU_SR_GIPn_MASK (0xF << MU_SR_GIPn_SHIFT)
 #define MU_SR_GIPn(IDX) (((0x8 >> (IDX)) << MU_SR_GIPn_SHIFT) & MU_SR_GIPn_MASK)
+#define MU_SR_GIPn_BIT_COUNT 4
 
 #define MU_SR_EP_SHIFT 4
 #define MU_SR_EP_MASK (0x1 << MU_SR_EP_SHIFT)

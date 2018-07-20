@@ -35,7 +35,14 @@ enum PTA_RPMSG_CMD {
 	// [out] memref[0]: An output buffer that gets written by the remote and
 	//                  returned back to the caller.
 	//
-	PTA_RPMSG_CMD_REMOTE_IO
+	PTA_RPMSG_CMD_REMOTE_IO,
+
+	//
+	// Boots the remote core using a pre-loaded firmware binary.
+	//
+	// [in] value[0].a: The remote core ID which is system specific.
+	//
+	PTA_RPMSG_CMD_BOOT_REMOTE
 };
 
 #endif /* __PTA_RPMSG_H */

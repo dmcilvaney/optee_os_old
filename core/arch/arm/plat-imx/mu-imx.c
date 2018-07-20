@@ -4,12 +4,12 @@
  *
  *  This program and the accompanying materials
  *  are licensed and made available under the terms and conditions of the BSD
- *License which accompanies this distribution.  The full text of the license may
- *be found at http://opensource.org/licenses/bsd-license.php
+ *  License which accompanies this distribution.  The full text of the license may
+ *  be found at http://opensource.org/licenses/bsd-license.php
  *
  *  THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
  *  WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR
- *IMPLIED.
+ *  IMPLIED.
  *
  **/
 #include <io.h>
@@ -128,6 +128,7 @@ bool mu_try_receive_msg(struct mu_regs *mu, uint32_t channel, uint32_t *msg)
 bool mu_get_flag(struct mu_regs *mu, uint32_t fn)
 {
 	uint32_t sr;
+	assert(fn < MU_SR_Fn_BIT_COUNT);
 	sr = read32((vaddr_t)&mu->sr);
 	return ((sr & MU_SR_Fn(fn)) != 0);
 }
@@ -137,12 +138,14 @@ bool mu_set_flag(struct mu_regs *mu, uint32_t fn, bool val)
 	int timeout = MU_POLL_TIMEOUT;
 	uint32_t cr;
 
+	assert(fn < MU_SR_Fn_BIT_COUNT);
+
 	while (mu_is_flags_pending(mu) && (timeout > 0)) {
 		timeout--;
 	}
 
 	if (timeout <= 0) {
-		EMSG("timeout waiting on TX empty");
+		EMSG("timeout waiting on flags to get unset");
 		return false;
 	}
 
@@ -175,6 +178,7 @@ bool mu_is_flags_pending(struct mu_regs *mu)
 void mu_enable_general_int(struct mu_regs *mu, uint32_t idx)
 {
 	uint32_t cr;
+	assert(idx < MU_SR_GIPn_BIT_COUNT);
 	cr = read32((vaddr_t)&mu->cr);
 	cr &= ~MU_CR_GIEn_MASK;
 	cr |= MU_CR_GIEn(idx);
@@ -184,14 +188,16 @@ void mu_enable_general_int(struct mu_regs *mu, uint32_t idx)
 void mu_disable_general_int(struct mu_regs *mu, uint32_t idx)
 {
 	uint32_t cr;
+	assert(idx < MU_SR_GIPn_BIT_COUNT);
 	cr = read32((vaddr_t)&mu->cr);
-	cr &= ~(MU_CR_GIEn_MASK | MU_CR_GIEn(idx));
+	cr &= ~(MU_CR_GIRn_MASK | MU_CR_GIEn(idx));
 	write32(cr, (vaddr_t)&mu->cr);
 }
 
 bool mu_is_general_int_pending(struct mu_regs *mu, uint32_t idx)
 {
 	uint32_t sr;
+	assert(idx < MU_SR_GIPn_BIT_COUNT);
 	sr = read32((vaddr_t)&mu->sr);
 	return ((sr & MU_SR_GIPn(idx)) != 0);
 }
@@ -199,6 +205,7 @@ bool mu_is_general_int_pending(struct mu_regs *mu, uint32_t idx)
 void mu_clear_general_int_pending(struct mu_regs *mu, uint32_t idx)
 {
 	uint32_t sr;
+	assert(idx < MU_SR_GIPn_BIT_COUNT);
 	sr = read32((vaddr_t)&mu->sr);
 	sr |= MU_SR_GIPn(idx);
 	write32(sr, (vaddr_t)&mu->sr);
