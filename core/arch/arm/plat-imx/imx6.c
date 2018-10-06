@@ -36,6 +36,7 @@
 #include <mm/core_memprot.h>
 #include <mm/core_mmu.h>
 #include <platform_config.h>
+#include <kernel/tee_common_otp.h>
 
 register_phys_mem(MEM_AREA_IO_SEC, SRC_BASE, CORE_MMU_DEVICE_SIZE);
 
@@ -79,4 +80,17 @@ void plat_cpu_reset_late(void)
 			 addr += 4)
 			write32(read32(addr) | CSU_SETTING_LOCK, addr);
 	}
+}
+
+// Temporary RNG test code
+#include <rng_support.h>
+
+// Use the 64 bit unique ID to generate the hardware unique key.
+void tee_otp_get_hw_unique_key(struct tee_hw_unique_key *hwkey)
+{
+    int i = 0;
+    EMSG("Testing RNG!");
+    for(i = 0; i < 100; i++) {
+        EMSG("%x",hw_get_random_byte());
+    }
 }

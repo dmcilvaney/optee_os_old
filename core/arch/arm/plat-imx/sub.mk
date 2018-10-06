@@ -23,3 +23,8 @@ endif
 srcs-$(CFG_MX7) += imx7.c a7_plat_init.S
 
 subdirs-$(CFG_PSCI_ARM32) += pm
+
+subdirs-$(CFG_FSL_CAAM) += fsl_caam
+global-incdirs-$(CFG_FSL_CAAM) += fsl_caam
+srcs-$(CFG_FSL_CAAM) += imx_rng.c
+cflags-imx_rng.c-$(CFG_FSL_CAAM) += -Wno-pedantic

@@ -82,6 +82,10 @@
 #define CAAM_BASE			0x02100000
 #endif
 
+#if defined(CFG_CYRES)
+#define CAAM_SECURE_MEMORY_BASE		0x00100000
+#endif
+
 #define GIC_CPU_BASE			(GIC_BASE + GICC_OFFSET)
 #define GIC_DIST_BASE			(GIC_BASE + GICD_OFFSET)
 
@@ -148,6 +152,10 @@
 #define UART1_BASE		0x30860000
 #define UART2_BASE		0x30890000
 #define UART3_BASE		0x30880000
+
+#if defined(CFG_CYRES)
+#define CAAM_SECURE_MEMORY_BASE		0x00100000
+#endif
 
 #define AIPS1_BASE		0x30000000
 #define AIPS1_SIZE		0x400000
