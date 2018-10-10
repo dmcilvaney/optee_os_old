@@ -81,16 +81,3 @@ void plat_cpu_reset_late(void)
 			write32(read32(addr) | CSU_SETTING_LOCK, addr);
 	}
 }
-
-// Temporary RNG test code
-#include <rng_support.h>
-
-// Use the 64 bit unique ID to generate the hardware unique key.
-void tee_otp_get_hw_unique_key(struct tee_hw_unique_key *hwkey)
-{
-    int i = 0;
-    EMSG("Testing RNG!");
-    for(i = 0; i < 100; i++) {
-        EMSG("%x",hw_get_random_byte());
-    }
-}
