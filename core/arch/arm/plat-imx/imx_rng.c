@@ -16,7 +16,7 @@ uint8_t hw_get_random_byte(void)
     int ret = TEE_SUCCESS;
 
     if(available <= 0) {
-        DMSG("Refilling RNG buffer");
+        FMSG("Refilling RNG buffer");
         ret = fsl_get_random_bytes(random_buffer, CAAM_RANDOM_BUFFER_SIZE);
         if (ret) {
             EMSG("Failed to get random bytes: %x", ret);
@@ -26,6 +26,5 @@ uint8_t hw_get_random_byte(void)
     }
 
     available -= 1;
-    DMSG("Generating random number: %x", random_buffer[available]);
     return random_buffer[available];
 }
