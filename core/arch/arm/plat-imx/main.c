@@ -37,6 +37,7 @@
 #include <kernel/misc.h>
 #include <kernel/panic.h>
 #include <kernel/pm_stubs.h>
+#include <kernel/tee_common_otp.h>
 #include <mm/core_mmu.h>
 #include <mm/core_memprot.h>
 #include <platform_config.h>
@@ -44,6 +45,11 @@
 #include <sm/optee_smc.h>
 #include <tee/entry_fast.h>
 #include <tee/entry_std.h>
+
+#ifdef CFG_CYRES
+#include <crypto/crypto.h>
+#include <imx_cdi.h>
+#endif
 
 
 static void main_fiq(void);
@@ -107,6 +113,13 @@ register_phys_mem(MEM_AREA_IO_SEC,
 register_phys_mem(MEM_AREA_IO_SEC,
 		  ROUNDDOWN(TZASC_BASE, CORE_MMU_DEVICE_SIZE),
 		  CORE_MMU_DEVICE_SIZE);
+#endif
+
+register_phys_mem(MEM_AREA_IO_SEC, CAAM_BASE, CORE_MMU_DEVICE_SIZE);
+#ifdef CFG_CYRES
+register_phys_mem(MEM_AREA_IO_SEC,
+	CAAM_SECURE_MEMORY_BASE,
+	CAAM_SECURE_MEMORY_PAGE_SIZE * 4);
 #endif
 
 const struct thread_handlers *generic_boot_get_handlers(void)
@@ -290,3 +303,115 @@ static TEE_Result init_tzc380(void)
 service_init(init_tzc380);
 #endif // #ifdef CFG_TZC380
 
+#ifdef CFG_CYRES
+
+TEE_Result imx_was_cdi_successful(void)
+{
+	TEE_Result res = TEE_SUCCESS;
+	struct cyres_identity_seed *unique_id =
+		(struct cyres_identity_seed *)phys_to_virt(
+						CYRES_IDENTITY_SEED_ADDR,
+						MEM_AREA_IO_SEC);
+
+	if (unique_id->magic != CYRES_IDENTITY_SEED_MAGIC) {
+		EMSG("Bad Cyres CDI magic, found 0x%x but was expecting 0x%x",
+				unique_id->magic,
+				CYRES_IDENTITY_SEED_MAGIC);
+		panic();
+	}
+	if (unique_id->version != CYRES_IDENTITY_SEED_VERSION) {
+		EMSG("Bad Cyres CDI version, found 0x%x but was expecting 0x%x",
+				unique_id->version,
+				CYRES_IDENTITY_SEED_VERSION);
+		panic();
+	}
+
+	if (!unique_id->cdi_valid) {
+		EMSG("SPL reports invalid CDI.");
+		EMSG("Ensure that High Assurance Boot (HAB) is enabled.");
+		EMSG("Try OP-TEE with CFG_RPMB_TESTKEY=y to skip CDI.");
+		res = TEE_ERROR_SECURITY;
+	}
+	return res;
+}
+
+/*
+ * SPL places a device identity derived from the CAAM's unique
+ * identity into CAAM secure memory. If HAB is not enabled then
+ * the cdi_valid flag will not be set. If it is not set this key
+ * should not be used to derive a RPMB key.
+ */
+
+TEE_Result tee_otp_get_hw_unique_key(struct tee_hw_unique_key *hwkey)
+{
+	TEE_Result res = TEE_SUCCESS;
+	void *ctx = NULL;
+	static uint8_t string_for_unique_key_gen[] = "imx_unique_key_gen";
+
+	struct cyres_identity_seed *unique_id =
+		(struct cyres_identity_seed *)phys_to_virt(
+						CYRES_IDENTITY_SEED_ADDR,
+						MEM_AREA_IO_SEC);
+
+	if (unique_id->magic != CYRES_IDENTITY_SEED_MAGIC) {
+		EMSG("Bad Cyres CDI magic, found 0x%x but was expecting 0x%x",
+				unique_id->magic,
+				CYRES_IDENTITY_SEED_MAGIC);
+		panic();
+	}
+	if (unique_id->version != CYRES_IDENTITY_SEED_VERSION) {
+		EMSG("Bad Cyres CDI version, found 0x%x but was expecting 0x%x",
+				unique_id->version,
+				CYRES_IDENTITY_SEED_VERSION);
+		panic();
+	}
+
+	if (imx_was_cdi_successful() != TEE_SUCCESS)
+		EMSG("SPL was unable to derive a unique ID from CAAM.");
+
+	res = crypto_mac_alloc_ctx(&ctx, TEE_ALG_HMAC_SHA256);
+	if (res)
+		goto err;
+
+	res = crypto_mac_init(ctx, TEE_ALG_HMAC_SHA256,
+				unique_id->hashed_cdi,
+				sizeof(unique_id->hashed_cdi));
+	if (res)
+		goto err;
+
+
+	res = crypto_mac_update(ctx, TEE_ALG_HMAC_SHA256,
+				string_for_unique_key_gen,
+				sizeof(string_for_unique_key_gen));
+	if (res)
+		goto err;
+
+	res = crypto_mac_final(ctx, TEE_ALG_HMAC_SHA256, hwkey->data,
+							sizeof(hwkey->data));
+	if (res)
+		goto err;
+
+	/*
+	 * If HAB is not enabled the CDI will not be correct.
+	 * This error is only checked when writing the RPMB key.
+	 */
+	if (imx_was_cdi_successful() != TEE_SUCCESS)
+		res = TEE_ERROR_SECURITY;
+
+err:
+	if (ctx != NULL)
+		crypto_mac_free_ctx(ctx, TEE_ALG_HMAC_SHA256);
+
+	if (res != TEE_SUCCESS)
+		EMSG("Failed to derive the HW unique key: %x", res);
+
+	return res;
+}
+
+/*
+ * iMX boards do not apear to provide die IDs, use the existing
+ * weak implementation.
+ */
+//int tee_otp_get_die_id(uint8_t *buffer, size_t len)
+
+#endif // CFG_CYRES

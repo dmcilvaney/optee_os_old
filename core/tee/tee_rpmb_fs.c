@@ -28,6 +28,10 @@
 #include <trace.h>
 #include <util.h>
 
+#ifdef CFG_CYRES
+#include <imx_cdi.h>
+#endif
+
 #define RPMB_STORAGE_START_ADDRESS      0
 #define RPMB_FS_FAT_START_ADDRESS       512
 #define RPMB_BLOCK_SIZE_SHIFT           8
@@ -1081,6 +1085,7 @@ static TEE_Result tee_rpmb_write_and_verify_key(uint16_t dev_id)
 	TEE_Result res;
 
 	DMSG("RPMB INIT: Writing Key");
+
 	res = tee_rpmb_write_key(dev_id);
 	if (res == TEE_SUCCESS) {
 		DMSG("RPMB INIT: Verifying Key");
