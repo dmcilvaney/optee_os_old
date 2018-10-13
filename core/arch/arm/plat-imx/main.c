@@ -47,6 +47,7 @@
 #include <tee/entry_std.h>
 
 #ifdef CFG_SPL_IDENTITY_SEED
+#include <assert.h>
 #include <crypto/crypto.h>
 #include <imx_cdi.h>
 #endif
@@ -315,8 +316,6 @@ service_init(init_tzc380);
 TEE_Result tee_otp_get_hw_unique_key(struct tee_hw_unique_key *hwkey)
 {
 	TEE_Result res = TEE_SUCCESS;
-	void *ctx = NULL;
-	static uint8_t string_for_unique_key_gen[] = "imx_unique_key_gen";
 
 	struct spl_identity_seed *unique_id =
 		(struct spl_identity_seed *)phys_to_virt(
@@ -336,45 +335,18 @@ TEE_Result tee_otp_get_hw_unique_key(struct tee_hw_unique_key *hwkey)
 		panic();
 	}
 
-	res = crypto_mac_alloc_ctx(&ctx, TEE_ALG_HMAC_SHA256);
-	if (res)
-		goto err;
-
-	res = crypto_mac_init(ctx, TEE_ALG_HMAC_SHA256,
-				unique_id->hashed_device_id,
-				sizeof(unique_id->hashed_device_id));
-	if (res)
-		goto err;
-
-
-	res = crypto_mac_update(ctx, TEE_ALG_HMAC_SHA256,
-				string_for_unique_key_gen,
-				sizeof(string_for_unique_key_gen));
-	if (res)
-		goto err;
-
-	res = crypto_mac_final(ctx, TEE_ALG_HMAC_SHA256, hwkey->data,
-							sizeof(hwkey->data));
-	if (res)
-		goto err;
-
-	/*
-	 * If HAB is not enabled the CDI will not be correct.
-	 * This error is only checked when writing the RPMB key.
-	 */
+	memset(hwkey->data,0,sizeof(hwkey->data));
+	
 	if (!unique_id->id_valid) {
-		EMSG("SPL reports invalid device ID.");
-		EMSG("Ensure that High Assurance Boot (HAB) is enabled.");
-		EMSG("Try OP-TEE with CFG_RPMB_TESTKEY=y to skip HW ID.");
+		EMSG("SPL reports invalid device ID, ensure that High Assurance Boot (HAB) is enabled, or run OP-TEE with CFG_RPMB_TESTKEY=y to skip HW ID.");
 		res = TEE_ERROR_SECURITY;
+	} else {
+		assert(sizeof(unique_id->hashed_device_id) >= sizeof(hwkey->data));
+		memcpy(hwkey->data,unique_id->hashed_device_id,
+			MIN(sizeof(unique_id->hashed_device_id),
+				sizeof(hwkey->data)));
+		res = TEE_SUCCESS;
 	}
-
-err:
-	if (ctx != NULL)
-		crypto_mac_free_ctx(ctx, TEE_ALG_HMAC_SHA256);
-
-	if (res != TEE_SUCCESS)
-		EMSG("Failed to derive the HW unique key: %x", res);
 
 	return res;
 }
