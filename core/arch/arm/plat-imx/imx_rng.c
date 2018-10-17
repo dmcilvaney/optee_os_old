@@ -1,6 +1,6 @@
 #include <fsl_caam/fsl_sec.h>
 #include <io.h>
-#include <kernel/mutex.h>
+#include <kernel/spinlock.h>
 #include <kernel/panic.h>
 #include <mm/core_mmu.h>
 #include <mm/core_memprot.h>
