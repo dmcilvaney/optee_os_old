@@ -230,7 +230,6 @@ TEE_Result tee_otp_get_hw_unique_key(struct tee_hw_unique_key *hwkey)
 		EMSG("Hardware Unique Key Failed");
 	} else {
 		DMSG("Hardware Unique Key Retrieved:");
-		DHEXDUMP(&hwkey->data[0], HW_UNIQUE_KEY_LENGTH);
 	}
 
 	return res;
